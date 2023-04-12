@@ -48,9 +48,7 @@
 
 #include "vibrant/vibrant.h"
 #include "vibrant/ctm.h"
-#include "vibrant/nvidia.h"
 
-#include <NVCtrl/NVCtrlLib.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -63,13 +61,8 @@ double ctmctrl_get_saturation(vibrant_controller *controller);
 
 void ctmctrl_set_saturation(vibrant_controller *controller, double saturation);
 
-double nvctrl_get_saturation(vibrant_controller *controller);
-
-void nvctrl_set_saturation(vibrant_controller *controller, double saturation);
-
 typedef enum vibrant_controller_backend {
     CTM,
-    XNVCtrl,
     Unknown
 } vibrant_controller_backend;
 
@@ -104,8 +97,6 @@ vibrant_errors vibrant_instance_new(vibrant_instance **instance,
 
         return vibrant_ConnectToX;
     }
-
-    bool dpy_has_nvidia = XNVCTRLQueryExtension(dpy, NULL, NULL);
 
     Window root = DefaultRootWindow(dpy);
     XRRScreenResources *resources = XRRGetScreenResources(dpy, root);
@@ -185,47 +176,6 @@ vibrant_errors vibrant_instance_new(vibrant_instance **instance,
 
     controllers = tmp;
     controllers_size = n_connected;
-
-    /**
-     * Check all available screens and outputs if they are managed by NVIDIA.
-     * If they are set their backend and nvIds
-     */
-    if (dpy_has_nvidia) {
-        for (int i = 0; i < ScreenCount(dpy); i++) {
-            if (XNVCTRLIsNvScreen(dpy, i)) {
-                int *nvDpyIds;
-                int nvDpyIdsLen;
-
-                /**
-                 * nvDpyIdsLen will contain how many bytes are inside of
-                 * nvDpyIds and the first element in nvDpyIds will tells us how
-                 * many *elements* are in the array. so on a two display system
-                 * nvDpyIdsLen will be 12 bytes and nvDpyIds will contain
-                 * 3 elements in the format of [2, first_dpy_id, second_dpy_id]
-                */
-                XNVCTRLQueryBinaryData(dpy, i, 0,
-                                       NV_CTRL_BINARY_DATA_DISPLAYS_ENABLED_ON_XSCREEN,
-                                       (unsigned char **) &nvDpyIds,
-                                       &nvDpyIdsLen);
-                for (int j = 1; j <= nvDpyIds[0]; j++) {
-                    int output;
-                    XNVCTRLQueryTargetAttribute(dpy,
-                                                NV_CTRL_TARGET_TYPE_DISPLAY,
-                                                nvDpyIds[j], 0,
-                                                NV_CTRL_DISPLAY_RANDR_OUTPUT_ID,
-                                                &output);
-                    for (size_t k = 0; k < controllers_size; k++) {
-                        if (controllers[k].output == output) {
-                            controllers[k].priv->backend = XNVCtrl;
-                            controllers[k].priv->nvId = nvDpyIds[j];
-                            controllers[k].priv->get_saturation = nvctrl_get_saturation;
-                            controllers[k].priv->set_saturation = nvctrl_set_saturation;
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     /**
      * Check remaining outputs if they support the CTM setting and set their
@@ -325,13 +275,4 @@ double ctmctrl_get_saturation(vibrant_controller *controller) {
 void ctmctrl_set_saturation(vibrant_controller *controller, double saturation) {
     ctm_set_saturation(controller->display, controller->output, saturation,
                        NULL);
-}
-
-double nvctrl_get_saturation(vibrant_controller *controller) {
-    return nvidia_get_saturation(controller->display, controller->priv->nvId);
-}
-
-void nvctrl_set_saturation(vibrant_controller *controller, double saturation) {
-    nvidia_set_saturation(controller->display, controller->priv->nvId,
-                          saturation);
 }
